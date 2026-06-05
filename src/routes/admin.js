@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 const adminAuth = require('../middleware/adminAuth');
 const upload = require('../middleware/upload');
+const rateLimiter = require('../middleware/rateLimiter');
 const adminController = require('../controllers/adminController');
 
-// POST /api/admin/login — 管理员登录
-router.post('/login', adminController.login);
+// POST /api/admin/login — 管理员登录（限流: 1分钟内最多 5 次尝试）
+router.post('/login', rateLimiter(5, 60_000), adminController.login);
 
 // POST /api/admin/files/upload — 上传 PDF（需管理员认证 + multer 文件处理）
 router.post(

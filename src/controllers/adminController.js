@@ -30,10 +30,16 @@ async function login(req, res) {
     return res.status(401).json({ error: '密码错误' });
   }
 
+  // JWT_SECRET 缺失时拒绝签发（无 fallback，防止密钥泄露导致的 Token 伪造）
+  if (!process.env.JWT_SECRET) {
+    console.error('[Admin] ⚠️  JWT_SECRET 环境变量为空！请在 Sealos 平台设置此变量');
+    return res.status(500).json({ error: '服务器配置错误：JWT 密钥未设置' });
+  }
+
   // 签发 JWT，有效期 24 小时
   const token = jwt.sign(
     { role: 'admin' },
-    process.env.JWT_SECRET || 'fallback-secret',
+    process.env.JWT_SECRET,
     { expiresIn: '24h' }
   );
 
@@ -54,8 +60,28 @@ async function uploadFile(req, res) {
       return res.status(400).json({ error: '请选择要上传的 PDF 文件' });
     }
 
+    // 二次校验：读取文件头部幻数，防止 MIME 类型伪造
+    const fd = await fs.open(file.path, 'r');
+    const buf = Buffer.alloc(4);
+    await fd.read(buf, 0, 4, 0);
+    await fd.close();
+    if (buf.toString() !== '%PDF') {
+      // 不是真 PDF，删除文件
+      await fs.unlink(file.path).catch(() => {});
+      return res.status(400).json({ error: '文件类型不符：仅接受真正的 PDF 文件' });
+    }
+
+    // 输入长度限制
+    if (title && title.length > 200) {
+      await fs.unlink(file.path).catch(() => {});
+      return res.status(400).json({ error: '标题不能超过 200 个字符' });
+    }
+    if (description && description.length > 2000) {
+      await fs.unlink(file.path).catch(() => {});
+      return res.status(400).json({ error: '描述不能超过 2000 个字符' });
+    }
+
     if (!title) {
-      // 如果没有填写标题，回退使用原始文件名（不含扩展名）
       req.body.title = file.originalname.replace(/\.pdf$/i, '');
     }
 
@@ -116,21 +142,21 @@ async function deleteFile(req, res) {
   const conn = await pool.getConnection();
 
   try {
-    // 查询文件记录以获取物理路径
+    await conn.beginTransaction();
+
+    // 使用 FOR UPDATE 锁定行，防止并发删除竞态
     const [rows] = await conn.query(
-      `SELECT stored_path FROM files WHERE id = ?`,
+      `SELECT stored_path FROM files WHERE id = ? FOR UPDATE`,
       [id]
     );
 
     if (rows.length === 0) {
+      await conn.rollback();
       conn.release();
       return res.status(404).json({ error: '文件不存在' });
     }
 
     const { stored_path } = rows[0];
-
-    // 开启事务：先删物理文件，再删数据库记录
-    await conn.beginTransaction();
 
     // 删除物理文件（不存在的文件不抛错）
     try {

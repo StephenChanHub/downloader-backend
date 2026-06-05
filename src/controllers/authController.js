@@ -15,44 +15,51 @@ async function verifyKey(req, res) {
     return res.status(400).json({ error: '请提供访问密钥' });
   }
 
+  // 输入长度限制（防止超长字符串攻击）
+  if (key.length > 200) {
+    return res.status(400).json({ error: '访问密钥格式无效' });
+  }
+
   try {
-    // 查询所有状态为 unused 的密钥（且未超过绝对过期时间）
-    console.log('[Auth] 查询未使用密钥...');
-    const [keys] = await pool.query(
-      `SELECT id, key_hash FROM access_keys
-       WHERE status = 'unused'
-         AND (expires_at IS NULL OR expires_at > NOW())`
-    );
-    console.log(`[Auth] 找到 ${keys.length} 个未使用密钥`);
-
-    // 逐一使用 bcrypt.compare 比对用户输入与数据库中的哈希
-    let matchedKey = null;
-    for (const row of keys) {
-      console.log(`[Auth] 比对密钥 ID=${row.id}, hash=${row.key_hash.substring(0, 10)}...`);
-      const match = await bcrypt.compare(key, row.key_hash);
-      if (match) {
-        matchedKey = row;
-        console.log(`[Auth] ✅ 密钥 ID=${row.id} 匹配成功`);
-        break;
-      }
-    }
-
-    if (!matchedKey) {
-      console.log('[Auth] 无匹配密钥');
-      return res.status(401).json({ error: '访问密钥无效或已被使用' });
-    }
-
-    // 生成 Session Token
+    // 提前生成 Session Token（事务中只使用哈希值）
     const rawToken = generateToken();
     const tokenHash = hashToken(rawToken);
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 分钟有效期
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
-    console.log('[Auth] 开启事务...');
+    console.log('[Auth] 开启事务（FOR UPDATE 防并发）...');
     const conn = await pool.getConnection();
 
     try {
-      // 开启事务：原子性地消耗密钥 + 创建会话
       await conn.beginTransaction();
+
+      // SELECT ... FOR UPDATE 锁定所有未使用密钥行，防止两个并发请求消费同一密钥
+      console.log('[Auth] 查询未使用密钥（FOR UPDATE）...');
+      const [keys] = await conn.query(
+        `SELECT id, key_hash FROM access_keys
+         WHERE status = 'unused'
+           AND (expires_at IS NULL OR expires_at > NOW())
+         FOR UPDATE`
+      );
+      console.log(`[Auth] 找到 ${keys.length} 个未使用密钥`);
+
+      // 逐一使用 bcrypt.compare 比对用户输入与数据库中的哈希
+      let matchedKey = null;
+      for (const row of keys) {
+        console.log(`[Auth] 比对密钥 ID=${row.id}, hash=${row.key_hash.substring(0, 10)}...`);
+        const match = await bcrypt.compare(key, row.key_hash);
+        if (match) {
+          matchedKey = row;
+          console.log(`[Auth] ✅ 密钥 ID=${row.id} 匹配成功`);
+          break;
+        }
+      }
+
+      if (!matchedKey) {
+        await conn.rollback();
+        conn.release();
+        console.log('[Auth] 无匹配密钥');
+        return res.status(401).json({ error: '访问密钥无效或已被使用' });
+      }
 
       // 将密钥标记为已使用
       await conn.query(

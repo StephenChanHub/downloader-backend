@@ -66,8 +66,8 @@ app.use(cors({
   credentials: true, // 允许携带 Cookie（session_token）
 }));
 
-// JSON 请求体解析
-app.use(express.json());
+// JSON 请求体解析（限制 1MB，防止大 payload 攻击）
+app.use(express.json({ limit: '1mb' }));
 
 // Cookie 解析
 app.use(cookieParser());
