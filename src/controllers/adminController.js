@@ -13,8 +13,14 @@ async function login(req, res) {
     return res.status(400).json({ error: '请输入密码' });
   }
 
-  // 去除 .env 中可能误加的引号（dotenv 不会自动剥离引号）
+  // 去除 .env 中可能误加的引号（dotenv 16.x 通常自动剥离，此处做兜底）
   const adminPassword = (process.env.ADMIN_PASSWORD || '').replace(/^["']|["']$/g, '');
+
+  // 环境变量缺失检测
+  if (!adminPassword) {
+    console.error('[Admin] ⚠️  ADMIN_PASSWORD 环境变量为空！请在 Sealos 平台设置此变量');
+    return res.status(500).json({ error: '服务器配置错误：管理员密码未设置' });
+  }
 
   console.log(`[Admin] 登录尝试 — 输入长度: ${password.length}, 期望长度: ${adminPassword.length}`);
 
@@ -27,7 +33,7 @@ async function login(req, res) {
   // 签发 JWT，有效期 24 小时
   const token = jwt.sign(
     { role: 'admin' },
-    process.env.JWT_SECRET,
+    process.env.JWT_SECRET || 'fallback-secret',
     { expiresIn: '24h' }
   );
 

@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 
 const express = require('express');
 const helmet = require('helmet');
@@ -12,6 +12,29 @@ const filesRoutes = require('./routes/files');
 const pool = require('./config/db');
 
 const app = express();
+
+// ---------------------------------------------------------------------------
+// 启动诊断：检查关键环境变量
+// ---------------------------------------------------------------------------
+{
+  const critical = ['ADMIN_PASSWORD', 'JWT_SECRET'];
+  const missing = critical.filter((k) => !process.env[k]);
+  if (missing.length > 0) {
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('⚠️  缺少关键环境变量:', missing.join(', '));
+    console.error('');
+    console.error('   可能原因:');
+    console.error('   1. .env 文件被 .gitignore 排除，容器中不存在');
+    console.error('   2. Sealos/Devbox 平台未注入环境变量');
+    console.error('');
+    console.error('   解决方法:');
+    console.error('   - 在 Sealos 平台 → 应用 → 环境变量 中设置:');
+    missing.forEach((k) => console.error(`     ${k}=<你的值>`));
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  } else {
+    console.log('[环境] ADMIN_PASSWORD 已设置, 长度:', process.env.ADMIN_PASSWORD.length);
+  }
+}
 
 // 信任 Sealos 网关代理（HTTPS 终止在网关，SameSite=None Cookie 需要）
 app.set("trust proxy", 1);
