@@ -9,29 +9,36 @@ const { generateToken, hashToken } = require('../utils/helpers');
 async function verifyKey(req, res) {
   const { key } = req.body;
 
+  console.log(`[Auth] 收到验证请求, key 长度: ${key ? key.length : 0}`);
+
   if (!key) {
     return res.status(400).json({ error: '请提供访问密钥' });
   }
 
   try {
     // 查询所有状态为 unused 的密钥（且未超过绝对过期时间）
+    console.log('[Auth] 查询未使用密钥...');
     const [keys] = await pool.query(
       `SELECT id, key_hash FROM access_keys
        WHERE status = 'unused'
          AND (expires_at IS NULL OR expires_at > NOW())`
     );
+    console.log(`[Auth] 找到 ${keys.length} 个未使用密钥`);
 
     // 逐一使用 bcrypt.compare 比对用户输入与数据库中的哈希
     let matchedKey = null;
     for (const row of keys) {
+      console.log(`[Auth] 比对密钥 ID=${row.id}, hash=${row.key_hash.substring(0, 10)}...`);
       const match = await bcrypt.compare(key, row.key_hash);
       if (match) {
         matchedKey = row;
+        console.log(`[Auth] ✅ 密钥 ID=${row.id} 匹配成功`);
         break;
       }
     }
 
     if (!matchedKey) {
+      console.log('[Auth] 无匹配密钥');
       return res.status(401).json({ error: '访问密钥无效或已被使用' });
     }
 
@@ -40,6 +47,7 @@ async function verifyKey(req, res) {
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 分钟有效期
 
+    console.log('[Auth] 开启事务...');
     const conn = await pool.getConnection();
 
     try {
@@ -61,30 +69,37 @@ async function verifyKey(req, res) {
 
       await conn.commit();
       conn.release();
+      console.log('[Auth] ✅ 事务提交成功');
     } catch (err) {
       await conn.rollback();
       conn.release();
-      console.error('[Auth] 事务失败:', err.message);
+      console.error('[Auth] 事务失败 — 完整错误:', err);
       return res.status(500).json({ error: '服务器内部错误' });
     }
 
     // 将 session_token 以 HttpOnly Cookie 形式返回
-    // 生产环境（HTTPS）启用 secure 标志；前后端同属 sealosgzg.site，SameSite=Strict 可正常工作
     res.cookie('session_token', rawToken, {
       httpOnly: true,
       sameSite: 'strict',
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 30 * 60 * 1000, // 30 分钟
+      maxAge: 30 * 60 * 1000,
     });
 
+    console.log('[Auth] ✅ 验证成功，返回 Cookie');
     return res.json({
       success: true,
       message: '验证成功，会话有效期为 30 分钟',
       expires_at: expiresAt.toISOString(),
     });
   } catch (err) {
-    console.error('[Auth] 密钥验证失败:', err.message);
-    return res.status(500).json({ error: '服务器内部错误' });
+    // 打印完整错误对象，包含 code、sqlMessage、stack 等所有诊断信息
+    console.error('[Auth] 密钥验证失败 — 完整错误:');
+    console.error('  message:', err.message);
+    console.error('  code:', err.code);
+    console.error('  sqlMessage:', err.sqlMessage);
+    console.error('  stack:', err.stack);
+    const detail = process.env.NODE_ENV === 'development' ? err.message : undefined;
+    return res.status(500).json({ error: '服务器内部错误', detail });
   }
 }
 

@@ -93,8 +93,13 @@ app.use((err, req, res, next) => {
 
 // 通用错误兜底
 app.use((err, req, res, _next) => {
-  console.error('[Server] 未捕获错误:', err);
-  res.status(500).json({ error: '服务器内部错误' });
+  console.error('[Server] 未捕获错误 — 完整信息:');
+  console.error('  message:', err.message);
+  console.error('  code:', err.code);
+  console.error('  stack:', err.stack);
+  // 开发环境返回详细错误信息，方便调试
+  const detail = process.env.NODE_ENV === 'development' ? err.message : undefined;
+  res.status(500).json({ error: '服务器内部错误', detail });
 });
 
 // ---------------------------------------------------------------------------

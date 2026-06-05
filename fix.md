@@ -1,24 +1,30 @@
-破案了！又是这个极其熟悉的 `using password: NO`！
+这个现象非常有意思！它印证了我们上一轮的猜测：**数据库彻底通了，但在处理业务逻辑的代码里，藏着一个被“消音”的致命 Bug。**
 
-这说明 Claude 在为你生成代码时，犯了一个 Node.js 开发中非常经典的遗漏：**它忘记在代码里加“读取环境变量”的起步开关了！**
+你的终端依然停留在“系统已启动”，说明 Node.js 并没有崩溃。这意味着 Claude 在写那段处理 `/api/auth/verify-key` 的代码时，用了一个 `try...catch` 把错误“吃掉”了，并且**只给前端返回了 500，却没有在控制台打印具体的错误原因**。
 
-虽然我们之前在 `test-db.js` 里写了 `require('dotenv').config()`，但 Claude 生成的主程序文件里大概率漏掉了这一句。这就导致 Express 启动时，依然两眼一抹黑，根本看不到你写在 `.env` 里的密码。
+出现这种“隐形 500”，在全栈开发中 90% 是由以下两个非常低级的配置遗漏引起的。我们马上来排查：
 
-### 🛠️ 一秒钟修复：
+### 🔍 第一嫌疑人：忘记解析 JSON (最高频)
 
-打开你后端项目里的 **`src/index.js`** 文件。
+前端发来的请求是带着 JSON 格式的数据（比如 `{ "key": "HELLOPDF" }`）。如果 Express 没有提前配置好“翻译官”，它读到的密码就是 `undefined`。接着把 `undefined` 交给 `bcrypt` 去做密码比对，瞬间就会报错并抛出 500。
 
-在文件的**第一行**（必须是最顶部的第一行，在所有其他 `require` 或业务逻辑之前），加上这句代码：
-
-```javascript
-require("dotenv").config();
-```
-
-加完之后，你的 `src/index.js` 头部看起来应该是这样的：
+**👉 快速检查 `src/index.js`：**
+打开你的 `src/index.js`，看一看在定义路由（比如 `app.use('/api/...', ...)`）的**前面**，Claude 有没有为你加上这一行核心代码：
 
 ```javascript
-require("dotenv").config(); // 👈 必须放在最前面！
-const express = require("express");
-const cors = require("cors");
-// ... 后面的代码保持不变
+app.use(express.json()); // 👈 这行极其关键，没有它后端就变“瞎子”了
 ```
+
+如果没有，请加上它，保存重启再试。
+
+---
+
+### 🔍 第二嫌疑人：数据库字段名对不上
+
+Claude 生成的 SQL 查询语句，可能和咱们真实在 Sealos 数据库里建的表结构有轻微出入。比如咱们建表时叫 `key_hash`，Claude 写代码时可能写成了 `password` 或者 `hash`。
+
+**👉 最快的破案方法：把代码发给我！**
+既然代码自己不报错，我们就直接“扒源码”。
+
+请你在 VS Code 里找到处理 `verify-key` 接口的那个文件：
+它通常在 **`src/routes/auth.js`** 或者 **`src/controllers/auth.js`** 里。

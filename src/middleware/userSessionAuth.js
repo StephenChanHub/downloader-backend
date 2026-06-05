@@ -37,7 +37,9 @@ async function userSessionAuth(req, res, next) {
     req.currentSession = session;
     next();
   } catch (err) {
-    console.error('[SessionAuth] 数据库查询失败:', err.message);
+    console.error('[SessionAuth] 数据库查询失败 — 完整错误:');
+    console.error('  message:', err.message);
+    console.error('  code:', err.code);
     return res.status(500).json({ error: '服务器内部错误' });
   }
 }
