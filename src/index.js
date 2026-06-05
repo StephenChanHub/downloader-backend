@@ -9,6 +9,7 @@ const { initStorage } = require('./config/init');
 const adminRoutes = require('./routes/admin');
 const authRoutes = require('./routes/auth');
 const filesRoutes = require('./routes/files');
+const pool = require('./config/db');
 
 const app = express();
 
@@ -48,6 +49,29 @@ app.use(cookieParser());
 // ---------------------------------------------------------------------------
 // 路由挂载
 // ---------------------------------------------------------------------------
+
+// 健康检查端点（供网关 / istio-envoy 探活使用）
+// 3 秒超时保护：DB 不可达时不会卡死
+app.get('/api/health', async (_req, res) => {
+  const dbPromise = (async () => {
+    const conn = await pool.getConnection();
+    await conn.ping();
+    conn.release();
+    return true;
+  })();
+
+  const dbOk = await Promise.race([
+    dbPromise,
+    new Promise((r) => setTimeout(() => r(false), 3000)),
+  ]).catch(() => false);
+
+  res.status(dbOk ? 200 : 503).json({
+    status: dbOk ? 'ok' : 'degraded',
+    db: dbOk,
+    uptime: process.uptime(),
+  });
+});
+
 app.use('/api/admin', adminRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/files', filesRoutes);
@@ -79,8 +103,25 @@ app.use((err, req, res, _next) => {
 const PORT = process.env.PORT || 8080;
 
 async function start() {
-  // 初始化 PDF 存储目录
+  // 初始化 PDF 存储目录（失败不阻止启动，上传功能会降级）
   await initStorage();
+
+  // 验证数据库连接（3 秒超时，失败不阻止启动）
+  try {
+    const dbPromise = (async () => {
+      const conn = await pool.getConnection();
+      await conn.ping();
+      conn.release();
+    })();
+    await Promise.race([
+      dbPromise,
+      new Promise((_, r) => setTimeout(() => r(new Error('连接超时')), 3000)),
+    ]);
+    console.log('[数据库] MySQL 连接验证成功');
+  } catch (err) {
+    console.error(`[数据库] ⚠️  MySQL 连接失败: ${err.message}`);
+    console.error('[数据库] 服务将继续运行，但 API 调用将返回 500');
+  }
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Server] PDF 分发系统已启动: http://0.0.0.0:${PORT}`);
