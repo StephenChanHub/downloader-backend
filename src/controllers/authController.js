@@ -78,10 +78,12 @@ async function verifyKey(req, res) {
     }
 
     // 将 session_token 以 HttpOnly Cookie 形式返回
+    // sameSite=none 允许跨子域传递（wmrazineousa ↔ cjdfnwwofgct）
+    // secure=true 是 sameSite=none 的强制要求（生产环境为 HTTPS）
     res.cookie('session_token', rawToken, {
       httpOnly: true,
-      sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      secure: true,
       maxAge: 30 * 60 * 1000,
     });
 

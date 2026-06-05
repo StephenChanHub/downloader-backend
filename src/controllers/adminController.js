@@ -13,8 +13,14 @@ async function login(req, res) {
     return res.status(400).json({ error: '请输入密码' });
   }
 
+  // 去除 .env 中可能误加的引号（dotenv 不会自动剥离引号）
+  const adminPassword = (process.env.ADMIN_PASSWORD || '').replace(/^["']|["']$/g, '');
+
+  console.log(`[Admin] 登录尝试 — 输入长度: ${password.length}, 期望长度: ${adminPassword.length}`);
+
   // 与环境变量中的 ADMIN_PASSWORD 明文比对
-  if (password !== process.env.ADMIN_PASSWORD) {
+  if (password !== adminPassword) {
+    console.log('[Admin] 密码不匹配');
     return res.status(401).json({ error: '密码错误' });
   }
 
@@ -25,6 +31,7 @@ async function login(req, res) {
     { expiresIn: '24h' }
   );
 
+  console.log('[Admin] ✅ 登录成功');
   return res.json({ token });
 }
 
