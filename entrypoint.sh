@@ -1,28 +1,15 @@
 #!/bin/bash
+#
+# PDF 分发系统 — 部署启动脚本
+# 生产环境为默认模式；开发模式需显式传入 "development" 参数
+#
 
-app_env=${1:-development}
+app_env=${1:-production}
 
-# Define build target
-build_target="src/index"
-
-# Development environment commands
-dev_commands() {
-    echo "Running development environment commands..."
-    NODE_ENV=development node "${build_target}.js"
-}
-
-# Production environment commands
-# ※Compiled before release
-prod_commands() {
-    echo "Running production environment commands..."
-    NODE_ENV=production node "${build_target}.js"
-}
-
-# Check environment variables to determine the running environment
-if [ "$app_env" = "production" ] || [ "$app_env" = "prod" ] ; then
-    echo "Production environment detected"
-    prod_commands
-else
+if [ "$app_env" = "development" ] || [ "$app_env" = "dev" ] ; then
     echo "Development environment detected"
-    dev_commands
+    exec env NODE_ENV=development node src/index.js
+else
+    echo "Production environment detected"
+    exec env NODE_ENV=production node src/index.js
 fi
