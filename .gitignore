@@ -1,0 +1,69 @@
+# =========================
+# 1. Node.js 核心依赖
+# =========================
+node_modules/
+# 如果你使用 npm，可以不忽略 package-lock.json，以保证依赖版本一致
+# 如果你使用 yarn，请加上 package-lock.json 并忽略 yarn.lock
+# package-lock.json 
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================
+# 2. 环境变量与安全机密 (CRITICAL)
+# =========================
+# 绝对不能把数据库密码、JWT 密钥推送到公开/私有仓库！
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+*.pem
+*.key
+*.crt
+
+# =========================
+# 3. 业务数据与持久卷 (PVC 挂载目录)
+# =========================
+# 拦截你本地测试或云端运行时的所有 PDF 文件和挂载目录
+/storage/
+/data/
+/uploads/
+*.pdf
+
+# =========================
+# 4. 运行日志与临时文件
+# =========================
+logs/
+*.log
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# =========================
+# 5. 系统文件 (Mac/Windows)
+# =========================
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =========================
+# 6. 编辑器与 IDE 缓存
+# =========================
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
