@@ -81,9 +81,9 @@ app.use(express.json({ limit: '1mb' }));
 // Cookie 解析
 app.use(cookieParser());
 
-// 全局 API 限流：每个 IP 15 分钟内最多 500 次请求
+// 用户端 API 限流：每个 IP 15 分钟内最多 1000 次请求
+// 管理员路由（/api/admin）已有 JWT 认证 + 专属限流，不在此列
 const { globalLimiter } = require('./middleware/rateLimiter');
-app.use('/api', globalLimiter);
 
 // ---------------------------------------------------------------------------
 // 路由挂载
