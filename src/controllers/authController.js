@@ -71,7 +71,7 @@ async function verifyKey(req, res) {
       await conn.query(
         `INSERT INTO sessions (token_hash, type, related_key_id, folder_name, expires_at)
          VALUES (?, 'user', ?, ?, ?)`,
-        [tokenHash, matchedKey.id, matchedKey.folder_name, expiresAt]
+        [tokenHash, matchedKey.id, matchedKey.folder_name || 'public', expiresAt]
       );
 
       await conn.commit();

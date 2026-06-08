@@ -56,8 +56,8 @@ async function uploadFile(req, res) {
     const { title, description } = req.body;
     const file = req.file;
 
-    // 从请求体获取文件夹名，如果前端没传，默认归入 'default'
-    const folderName = req.body.folder_name || 'default';
+    // 从请求体获取文件夹名，如果前端没传，默认归入 'public'
+    const finalFolder = req.body.folder_name || 'public';
 
     if (!file) {
       return res.status(400).json({ error: '请选择要上传的 PDF 文件' });
@@ -101,7 +101,7 @@ async function uploadFile(req, res) {
         file.filename,
         file.path,
         file.size,
-        folderName,
+        finalFolder,
       ]
     );
 
@@ -110,6 +110,7 @@ async function uploadFile(req, res) {
       title: finalTitle,
       original_name: file.originalname,
       size: file.size,
+      folder_name: finalFolder,
     });
   } catch (err) {
     console.error('[Admin] 文件上传失败:', err.message);
@@ -123,41 +124,13 @@ async function uploadFile(req, res) {
  */
 async function listFiles(req, res) {
   try {
-    // 分页参数
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const offset = (page - 1) * limit;
-    const search = (req.query.search || '').trim();
-
-    // 构建 WHERE 条件
-    const conditions = [];
-    const params = [];
-
-    if (search) {
-      conditions.push('title LIKE ?');
-      params.push(`%${search}%`);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    // 查询总数
-    const [[{ total }]] = await pool.query(
-      `SELECT COUNT(*) AS total FROM files ${whereClause}`,
-      params
-    );
-
-    // 查询当前页数据
     const [rows] = await pool.query(
       `SELECT id, title, description, original_name, stored_name, stored_path,
-              size, mime_type, status, folder_name, download_count, created_at, updated_at
+              size, mime_type, status, download_count, created_at, updated_at, folder_name
        FROM files
-       ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+       ORDER BY created_at DESC`
     );
-
-    return res.json({ total, page, limit, files: rows });
+    return res.json(rows);
   } catch (err) {
     console.error('[Admin] 文件列表查询失败:', err.message);
     return res.status(500).json({ error: '查询失败' });

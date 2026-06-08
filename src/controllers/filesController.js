@@ -8,43 +8,19 @@ const pool = require('../config/db');
  */
 async function listFiles(req, res) {
   try {
-    // 分页参数：page（页码，默认1）、limit（每页条数，默认20，最大100）
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const offset = (page - 1) * limit;
-    const search = (req.query.search || '').trim();
+    // 读取当前 Session 绑定的专属文件夹名
+    const userFolder = req.currentSession.folder_name || 'public';
 
-    // 按当前会话的 folder_name 进行文件夹隔离
-    const folderName = req.currentSession.folder_name;
-
-    // 构建 WHERE 条件与参数
-    const conditions = ['status = ?', 'folder_name = ?'];
-    const params = ['active', folderName];
-
-    if (search) {
-      conditions.push('title LIKE ?');
-      params.push(`%${search}%`);
-    }
-
-    const whereClause = conditions.join(' AND ');
-
-    // 查询总数
-    const [[{ total }]] = await pool.query(
-      `SELECT COUNT(*) AS total FROM files WHERE ${whereClause}`,
-      params
-    );
-
-    // 查询当前页数据（仅返回安全字段，不暴露存储路径）
+    // 核心：按 folder_name 过滤，只返回该用户专属文件夹内的文件
     const [rows] = await pool.query(
-      `SELECT id, title, description, size, created_at
+      `SELECT id, title, description, size, created_at, folder_name
        FROM files
-       WHERE ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+       WHERE status = 'active' AND folder_name = ?
+       ORDER BY created_at DESC`,
+      [userFolder]
     );
 
-    return res.json({ total, page, limit, files: rows });
+    return res.json(rows);
   } catch (err) {
     console.error('[Files] 文件列表查询失败:', err.message);
     return res.status(500).json({ error: '查询失败' });
@@ -65,7 +41,7 @@ async function downloadFile(req, res) {
       `SELECT id, original_name, stored_name, stored_path, mime_type
        FROM files
        WHERE id = ? AND status = 'active' AND folder_name = ?`,
-      [id, session.folder_name]
+      [id, session.folder_name || 'public']
     );
 
     if (rows.length === 0) {
