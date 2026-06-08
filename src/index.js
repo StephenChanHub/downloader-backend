@@ -1,9 +1,13 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 
+// 日志系统 — 必须在最前面加载，以覆盖全局 console
+require('./utils/logger');
+
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const morgan = require('morgan');
 const { initStorage } = require('./config/init');
 
 const adminRoutes = require('./routes/admin');
@@ -46,6 +50,11 @@ app.set("trust proxy", 1);
 // 安全头（防止常见 Web 漏洞）
 app.use(helmet());
 
+// HTTP 请求日志（通过 morgan 写入 winston 综合日志）
+app.use(morgan('combined', {
+  stream: { write: (msg) => console.log(msg.trim()) },
+}));
+
 // 跨域支持（前后端分离部署在不同子域，需开启 credentials 以支持 Cookie）
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',                                // 本地前端开发
@@ -71,6 +80,10 @@ app.use(express.json({ limit: '1mb' }));
 
 // Cookie 解析
 app.use(cookieParser());
+
+// 全局 API 限流：每个 IP 15 分钟内最多 500 次请求
+const { globalLimiter } = require('./middleware/rateLimiter');
+app.use('/api', globalLimiter);
 
 // ---------------------------------------------------------------------------
 // 路由挂载

@@ -8,16 +8,43 @@ const pool = require('../config/db');
  */
 async function listFiles(req, res) {
   try {
-    // 仅返回 id, title, description, size, created_at
-    // 绝不向前端暴露 stored_name 或 stored_path
+    // 分页参数：page（页码，默认1）、limit（每页条数，默认20，最大100）
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+    const search = (req.query.search || '').trim();
+
+    // 按当前会话的 folder_name 进行文件夹隔离
+    const folderName = req.currentSession.folder_name;
+
+    // 构建 WHERE 条件与参数
+    const conditions = ['status = ?', 'folder_name = ?'];
+    const params = ['active', folderName];
+
+    if (search) {
+      conditions.push('title LIKE ?');
+      params.push(`%${search}%`);
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // 查询总数
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total FROM files WHERE ${whereClause}`,
+      params
+    );
+
+    // 查询当前页数据（仅返回安全字段，不暴露存储路径）
     const [rows] = await pool.query(
       `SELECT id, title, description, size, created_at
        FROM files
-       WHERE status = 'active'
-       ORDER BY created_at DESC`
+       WHERE ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
     );
 
-    return res.json(rows);
+    return res.json({ total, page, limit, files: rows });
   } catch (err) {
     console.error('[Files] 文件列表查询失败:', err.message);
     return res.status(500).json({ error: '查询失败' });
@@ -33,12 +60,12 @@ async function downloadFile(req, res) {
   const session = req.currentSession;
 
   try {
-    // 查询文件记录获取真实存储路径
+    // 查询文件记录获取真实存储路径（同时校验 folder_name 防止越权）
     const [rows] = await pool.query(
       `SELECT id, original_name, stored_name, stored_path, mime_type
        FROM files
-       WHERE id = ? AND status = 'active'`,
-      [id]
+       WHERE id = ? AND status = 'active' AND folder_name = ?`,
+      [id, session.folder_name]
     );
 
     if (rows.length === 0) {
@@ -58,48 +85,81 @@ async function downloadFile(req, res) {
       return res.status(403).json({ error: '禁止访问' });
     }
 
-    // 检查物理文件是否存在
+    // 获取文件大小（用于 Range 支持）
+    let fileSize;
     try {
-      await fs.promises.access(resolvedPath, fs.constants.R_OK);
+      const stat = await fs.promises.stat(resolvedPath);
+      fileSize = stat.size;
     } catch {
       return res.status(404).json({ error: '文件不存在于服务器' });
     }
 
-    // 异步记录下载日志 + 更新计数（不阻塞文件流输出）
+    // 异步记录下载日志 + 更新计数（不阻塞文件流输出，仅全量下载时记录）
     const clientIp = req.ip || req.connection.remoteAddress;
     const userAgent = req.headers['user-agent'] || null;
 
-    pool.query(
-      `INSERT INTO download_logs (session_id, file_id, ip, user_agent)
-       VALUES (?, ?, ?, ?)`,
-      [session.id, file.id, clientIp, userAgent]
-    ).catch(err => console.error('[Files] 下载日志记录失败:', err.message));
+    // 解析 Range 请求头（格式: bytes=start-end）
+    const range = req.headers.range;
+    let start = 0;
+    let end = fileSize - 1;
+    let isRangeRequest = false;
 
-    pool.query(
-      `UPDATE files SET download_count = download_count + 1 WHERE id = ?`,
-      [file.id]
-    ).catch(err => console.error('[Files] 下载计数更新失败:', err.message));
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      start = parseInt(parts[0], 10) || 0;
+      end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
-    pool.query(
-      `UPDATE sessions SET download_count = download_count + 1 WHERE id = ?`,
-      [session.id]
-    ).catch(err => console.error('[Files] 会话下载计数更新失败:', err.message));
+      // 校验 Range 合法性
+      if (start >= fileSize || end >= fileSize || start > end) {
+        res.setHeader('Content-Range', `bytes */${fileSize}`);
+        return res.status(416).json({ error: '请求范围不合法' });
+      }
+
+      isRangeRequest = true;
+    }
+
+    // 仅在全量下载（非 Range）时记录日志和更新计数
+    if (!isRangeRequest) {
+      pool.query(
+        `INSERT INTO download_logs (session_id, file_id, ip, user_agent)
+         VALUES (?, ?, ?, ?)`,
+        [session.id, file.id, clientIp, userAgent]
+      ).catch(err => console.error('[Files] 下载日志记录失败:', err.message));
+
+      pool.query(
+        `UPDATE files SET download_count = download_count + 1 WHERE id = ?`,
+        [file.id]
+      ).catch(err => console.error('[Files] 下载计数更新失败:', err.message));
+
+      pool.query(
+        `UPDATE sessions SET download_count = download_count + 1 WHERE id = ?`,
+        [session.id]
+      ).catch(err => console.error('[Files] 会话下载计数更新失败:', err.message));
+    }
 
     // 设置响应头
-    // 使用 encodeURIComponent 处理中文文件名
     const encodedFilename = encodeURIComponent(file.original_name);
     res.setHeader(
       'Content-Disposition',
       `attachment; filename*=UTF-8''${encodedFilename}`
     );
     res.setHeader('Content-Type', file.mime_type || 'application/pdf');
+    res.setHeader('Accept-Ranges', 'bytes');
 
-    // 流式输出文件内容给客户端
-    const readStream = fs.createReadStream(resolvedPath);
+    if (isRangeRequest) {
+      const chunkSize = end - start + 1;
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+      res.setHeader('Content-Length', chunkSize);
+    } else {
+      res.setHeader('Content-Length', fileSize);
+    }
+
+    // 流式输出文件内容（支持 Range 分段读取）
+    const readStream = fs.createReadStream(resolvedPath, { start, end });
 
     readStream.on('error', (err) => {
       console.error(`[Files] 文件流读取失败: ${err.message}`);
-      // 响应头已发送，只能终止连接
       if (!res.headersSent) {
         res.status(500).json({ error: '文件读取失败' });
       } else {

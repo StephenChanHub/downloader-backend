@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS `files` (
 `mime_type` VARCHAR(50) DEFAULT 'application/pdf' COMMENT '文件MIME类型',
 `status` VARCHAR(20) DEFAULT 'active' COMMENT '状态: active/inactive',
 `download_count` INT DEFAULT 0 COMMENT '该文件被下载的总次数',
+`folder_name` VARCHAR(50) DEFAULT 'default' COMMENT '文件所属的文件夹',
 `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
 `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文件元数据表';
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS `access_keys` (
 `status` VARCHAR(20) DEFAULT 'unused' COMMENT '状态: unused/used/expired',
 `expires_at` DATETIME NULL COMMENT '密钥绝对过期时间',
 `used_at` DATETIME NULL COMMENT '首次被使用/激活的时间',
+`folder_name` VARCHAR(50) DEFAULT 'default' COMMENT '该密钥可访问的文件夹',
 `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '密钥生成时间'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统访问门票表';
 
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS `sessions` (
 `type` VARCHAR(20) DEFAULT 'user' COMMENT '会话类型: user/admin',
 `related_key_id` INT NULL COMMENT '关联的access_keys表ID',
 `download_count` INT DEFAULT 0 COMMENT '当前会话周期内已下载的次数',
+`folder_name` VARCHAR(50) DEFAULT 'default' COMMENT '当前会话授权的文件夹',
 `expires_at` DATETIME NOT NULL COMMENT '会话强制过期时间',
 `last_seen_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '最后活跃心跳时间',
 `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '会话创建时间',

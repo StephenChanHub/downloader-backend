@@ -1,43 +1,39 @@
-/**
- * 简易内存限流中间件
- * 防止暴力破解管理员密码和一次性密钥
- */
-
-const attempts = new Map();
-
-// 每 60 秒清理过期记录
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, record] of attempts) {
-    if (now - record.resetAt > 0) attempts.delete(key);
-  }
-}, 60_000).unref();
+const rateLimit = require('express-rate-limit');
 
 /**
- * @param {number} maxAttempts 窗口内最大请求数
- * @param {number} windowMs   时间窗口（毫秒）
+ * 全局 API 限流：每个 IP 15 分钟内最多 500 次请求
  */
-function rateLimiter(maxAttempts = 10, windowMs = 60_000) {
-  return (req, res, next) => {
-    const key = req.ip || req.connection.remoteAddress;
-    const now = Date.now();
-    const record = attempts.get(key);
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 分钟
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '请求过于频繁，请稍后再试' },
+});
 
-    if (!record || now > record.resetAt) {
-      attempts.set(key, { count: 1, resetAt: now + windowMs });
-      return next();
-    }
+/**
+ * 门票验证接口限流：每个 IP 1 分钟内最多 5 次试错，超出封禁 15 分钟
+ */
+const verifyKeyLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,  // 1 分钟窗口
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: '请求过于频繁，请稍后再试',
+    hint: '密钥验证失败次数过多，请 15 分钟后再尝试',
+  },
+});
 
-    record.count++;
-    if (record.count > maxAttempts) {
-      return res.status(429).json({
-        error: '请求过于频繁，请稍后再试',
-        retryAfter: Math.ceil((record.resetAt - now) / 1000),
-      });
-    }
+/**
+ * 管理员登录限流：每个 IP 1 分钟内最多 5 次尝试
+ */
+const adminLoginLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '请求过于频繁，请稍后再试' },
+});
 
-    next();
-  };
-}
-
-module.exports = rateLimiter;
+module.exports = { globalLimiter, verifyKeyLimiter, adminLoginLimiter };

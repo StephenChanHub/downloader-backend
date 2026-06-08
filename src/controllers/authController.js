@@ -35,7 +35,7 @@ async function verifyKey(req, res) {
       // SELECT ... FOR UPDATE 锁定所有未使用密钥行，防止两个并发请求消费同一密钥
       console.log('[Auth] 查询未使用密钥（FOR UPDATE）...');
       const [keys] = await conn.query(
-        `SELECT id, key_hash FROM access_keys
+        `SELECT id, key_hash, folder_name FROM access_keys
          WHERE status = 'unused'
            AND (expires_at IS NULL OR expires_at > NOW())
          FOR UPDATE`
@@ -67,11 +67,11 @@ async function verifyKey(req, res) {
         [matchedKey.id]
       );
 
-      // 创建会话记录
+      // 创建会话记录（带上文件夹隔离信息）
       await conn.query(
-        `INSERT INTO sessions (token_hash, type, related_key_id, expires_at)
-         VALUES (?, 'user', ?, ?)`,
-        [tokenHash, matchedKey.id, expiresAt]
+        `INSERT INTO sessions (token_hash, type, related_key_id, folder_name, expires_at)
+         VALUES (?, 'user', ?, ?, ?)`,
+        [tokenHash, matchedKey.id, matchedKey.folder_name, expiresAt]
       );
 
       await conn.commit();
