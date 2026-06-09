@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS `access_keys` (
 `key_hash` VARCHAR(255) NOT NULL UNIQUE COMMENT '加盐哈希后的密钥值',
 `status` VARCHAR(20) DEFAULT 'unused' COMMENT '状态: unused/used/expired',
 `expires_at` DATETIME NULL COMMENT '密钥绝对过期时间',
+`duration_minutes` INT DEFAULT 1440 COMMENT '验证后生成的会话有效时长(分钟)',
 `used_at` DATETIME NULL COMMENT '首次被使用/激活的时间',
 `folder_name` VARCHAR(50) DEFAULT 'default' COMMENT '该密钥可访问的文件夹',
 `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '密钥生成时间'

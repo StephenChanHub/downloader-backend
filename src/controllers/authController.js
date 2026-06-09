@@ -21,11 +21,6 @@ async function verifyKey(req, res) {
   }
 
   try {
-    // 提前生成 Session Token（事务中只使用哈希值）
-    const rawToken = generateToken();
-    const tokenHash = hashToken(rawToken);
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-
     console.log('[Auth] 开启事务（FOR UPDATE 防并发）...');
     const conn = await pool.getConnection();
 
@@ -35,7 +30,7 @@ async function verifyKey(req, res) {
       // SELECT ... FOR UPDATE 锁定所有未使用密钥行，防止两个并发请求消费同一密钥
       console.log('[Auth] 查询未使用密钥（FOR UPDATE）...');
       const [keys] = await conn.query(
-        `SELECT id, key_hash, folder_name FROM access_keys
+        `SELECT id, key_hash, folder_name, duration_minutes FROM access_keys
          WHERE status = 'unused'
            AND (expires_at IS NULL OR expires_at > NOW())
          FOR UPDATE`
@@ -60,6 +55,12 @@ async function verifyKey(req, res) {
         console.log('[Auth] 无匹配密钥');
         return res.status(401).json({ error: '访问密钥无效或已被使用' });
       }
+
+      // 动态计算会话有效时长（分钟 → 毫秒，兜底 30 分钟）
+      const durationMs = (matchedKey.duration_minutes || 30) * 60 * 1000;
+      const rawToken = generateToken();
+      const tokenHash = hashToken(rawToken);
+      const expiresAt = new Date(Date.now() + durationMs);
 
       // 将密钥标记为已使用
       await conn.query(
@@ -91,13 +92,13 @@ async function verifyKey(req, res) {
       httpOnly: true,
       sameSite: 'none',
       secure: true,
-      maxAge: 30 * 60 * 1000,
+      maxAge: durationMs,
     });
 
     console.log('[Auth] ✅ 验证成功，返回 Cookie');
     return res.json({
       success: true,
-      message: '验证成功，会话有效期为 30 分钟',
+      message: '验证成功',
       expires_at: expiresAt.toISOString(),
     });
   } catch (err) {
