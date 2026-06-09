@@ -20,6 +20,9 @@ async function verifyKey(req, res) {
     return res.status(400).json({ error: '访问密钥格式无效' });
   }
 
+  // 在外层作用域声明，确保事务提交后仍可访问
+  let rawToken, durationMs, expiresAt;
+
   try {
     console.log('[Auth] 开启事务（FOR UPDATE 防并发）...');
     const conn = await pool.getConnection();
@@ -57,10 +60,10 @@ async function verifyKey(req, res) {
       }
 
       // 动态计算会话有效时长（分钟 → 毫秒，兜底 30 分钟）
-      const durationMs = (matchedKey.duration_minutes || 30) * 60 * 1000;
-      const rawToken = generateToken();
+      durationMs = (matchedKey.duration_minutes || 30) * 60 * 1000;
+      rawToken = generateToken();
       const tokenHash = hashToken(rawToken);
-      const expiresAt = new Date(Date.now() + durationMs);
+      expiresAt = new Date(Date.now() + durationMs);
 
       // 将密钥标记为已使用
       await conn.query(
