@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const pool = require('../config/db');
 const { generateToken, hashToken } = require('../utils/helpers');
 
@@ -21,35 +21,30 @@ async function verifyKey(req, res) {
   }
 
   try {
-    // 1. 扩大门票搜索范围：未使用的，或者【已使用但还没过期的】
-    //    日票逻辑：只要票还在生命周期内，就能反复进入
+    // 1. SHA-256 哈希用户输入，直接用索引 O(1) 精准秒查
+    //    告别 bcrypt 的 for...of 循环（O(N) 龟速比对）！
+    const inputHash = crypto.createHash('sha256').update(key).digest('hex');
+
     const [keys] = await pool.query(
-      `SELECT id, key_hash, folder_name, duration_minutes, status, used_at
+      `SELECT id, folder_name, duration_minutes, status, used_at
        FROM access_keys
-       WHERE (expires_at IS NULL OR expires_at > NOW())
+       WHERE key_hash = ?
+         AND (expires_at IS NULL OR expires_at > NOW())
          AND (
            status = 'unused'
            OR
            (status = 'used' AND DATE_ADD(used_at, INTERVAL duration_minutes MINUTE) > NOW())
-         )`
+         )`,
+      [inputHash]
     );
-    console.log(`[Auth] 找到 ${keys.length} 个有效密钥`);
 
-    // 逐一使用 bcrypt.compare 比对用户输入与数据库中的哈希
-    let matchedKey = null;
-    for (const row of keys) {
-      const match = await bcrypt.compare(key, row.key_hash);
-      if (match) {
-        matchedKey = row;
-        console.log(`[Auth] ✅ 密钥 ID=${row.id} 匹配成功 (status: ${row.status})`);
-        break;
-      }
-    }
-
-    if (!matchedKey) {
-      console.log('[Auth] 无匹配密钥');
+    if (keys.length === 0) {
+      console.log('[Auth] 密钥无效、已过期或不存在');
       return res.status(401).json({ error: '密钥无效、已过期或不存在' });
     }
+
+    const matchedKey = keys[0];
+    console.log(`[Auth] ✅ 密钥 ID=${matchedKey.id} 匹配成功 (status: ${matchedKey.status})`);
 
     // 2. 核心逻辑：动态计算本次下发的【剩余寿命】
     const durationMs = (matchedKey.duration_minutes || 1440) * 60 * 1000;

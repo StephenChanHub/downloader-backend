@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS `files` (
 -- ==========================================
 CREATE TABLE IF NOT EXISTS `access_keys` (
 `id` INT AUTO_INCREMENT PRIMARY KEY COMMENT '密钥唯一标识',
-`key_hash` VARCHAR(255) NOT NULL UNIQUE COMMENT '加盐哈希后的密钥值',
+`key_hash` VARCHAR(64) NOT NULL UNIQUE COMMENT '密钥的SHA-256哈希值(利用UNIQUE索引实现O(1)秒查)',
 `status` VARCHAR(20) DEFAULT 'unused' COMMENT '状态: unused/used/expired',
 `expires_at` DATETIME NULL COMMENT '密钥绝对过期时间',
 `duration_minutes` INT DEFAULT 1440 COMMENT '验证后生成的会话有效时长(分钟)',
