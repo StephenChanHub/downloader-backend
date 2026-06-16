@@ -119,7 +119,8 @@ async function downloadFile(req, res) {
       'Content-Disposition',
       `attachment; filename*=UTF-8''${encodedFilename}`
     );
-    res.setHeader('Content-Type', file.mime_type || 'application/pdf');
+    // 使用实际 MIME 类型，未知则用通用二进制流（避免浏览器误加 .pdf 后缀）
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
     res.setHeader('Accept-Ranges', 'bytes');
 
     if (isRangeRequest) {
