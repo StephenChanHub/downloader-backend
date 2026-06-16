@@ -48,7 +48,52 @@ async function login(req, res) {
 }
 
 /**
- * 上传 PDF 文件
+ * 已知文件类型的幻数签名（Magic Bytes）映射
+ * 用于二次校验，防止 MIME 类型伪造
+ */
+const MAGIC_BYTES = {
+  pdf:  { offset: 0, bytes: Buffer.from('%PDF'),                                     label: 'PDF' },
+  zip:  { offset: 0, bytes: Buffer.from([0x50, 0x4B, 0x03, 0x04]),                  label: 'ZIP' },
+  rar:  { offset: 0, bytes: Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07]),      label: 'RAR' },
+  sevenZip: { offset: 0, bytes: Buffer.from([0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]), label: '7z' },
+  gz:   { offset: 0, bytes: Buffer.from([0x1F, 0x8B]),                              label: 'GZIP' },
+  bz2:  { offset: 0, bytes: Buffer.from([0x42, 0x5A, 0x68]),                        label: 'BZ2' },
+  xz:   { offset: 0, bytes: Buffer.from([0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00]),      label: 'XZ' },
+};
+
+/**
+ * 读取文件头部并检测真实类型（返回类型 key，未知则返回 null）
+ */
+async function detectFileType(filePath) {
+  const fd = await fs.open(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(8);
+    await fd.read(buf, 0, 8, 0);
+
+    // 按优先级检测（PDF 优先，因为 ZIP 的 PK 头也可能匹配到其他格式的变体）
+    if (buf.slice(0, 4).equals(MAGIC_BYTES.pdf.bytes))    return 'pdf';
+    if (buf.slice(0, 6).equals(MAGIC_BYTES.rar.bytes))    return 'rar';
+    if (buf.slice(0, 6).equals(MAGIC_BYTES.sevenZip.bytes)) return 'sevenZip';
+    if (buf.slice(0, 2).equals(MAGIC_BYTES.gz.bytes))     return 'gz';
+    if (buf.slice(0, 6).equals(MAGIC_BYTES.xz.bytes))     return 'xz';
+    if (buf.slice(0, 3).equals(MAGIC_BYTES.bz2.bytes))    return 'bz2';
+    if (buf.slice(0, 4).equals(MAGIC_BYTES.zip.bytes))    return 'zip';
+    return null;
+  } finally {
+    await fd.close();
+  }
+}
+
+/**
+ * 根据原始文件名提取无扩展名的标题
+ */
+function extractTitle(originalName) {
+  const basename = originalName.replace(/\.(pdf|zip|rar|7z|gz|gzip|tar|bz2|bzip2|xz|tgz|tar\.gz|tar\.bz2|tar\.xz)$/i, '');
+  return basename;
+}
+
+/**
+ * 上传文件（支持 PDF + 压缩包）
  * POST /api/admin/files/upload
  */
 async function uploadFile(req, res) {
@@ -60,19 +105,16 @@ async function uploadFile(req, res) {
     const finalFolder = req.body.folder_name || 'public';
 
     if (!file) {
-      return res.status(400).json({ error: '请选择要上传的 PDF 文件' });
+      return res.status(400).json({ error: '请选择要上传的文件' });
     }
 
-    // 二次校验：读取文件头部幻数，防止 MIME 类型伪造
-    const fd = await fs.open(file.path, 'r');
-    const buf = Buffer.alloc(4);
-    await fd.read(buf, 0, 4, 0);
-    await fd.close();
-    if (buf.toString() !== '%PDF') {
-      // 不是真 PDF，删除文件
+    // 二次校验：读取文件头部幻数，验证真实类型
+    const detected = await detectFileType(file.path);
+    if (!detected) {
       await fs.unlink(file.path).catch(() => {});
-      return res.status(400).json({ error: '文件类型不符：仅接受真正的 PDF 文件' });
+      return res.status(400).json({ error: '文件类型不符：仅接受 PDF 或压缩包文件（zip/rar/7z/gz/tar/bz2/xz）' });
     }
+    console.log(`[Admin] 文件类型检测: ${MAGIC_BYTES[detected].label} (${file.originalname})`);
 
     // 输入长度限制
     if (title && title.length > 200) {
@@ -84,16 +126,13 @@ async function uploadFile(req, res) {
       return res.status(400).json({ error: '描述不能超过 2000 个字符' });
     }
 
-    if (!title) {
-      req.body.title = file.originalname.replace(/\.pdf$/i, '');
-    }
-
-    const finalTitle = req.body.title || file.originalname.replace(/\.pdf$/i, '');
+    // 自动生成标题（去除扩展名）
+    const finalTitle = title || extractTitle(file.originalname);
 
     // 将文件元数据写入 files 表（含文件夹标签）
     const [result] = await pool.query(
-      `INSERT INTO files (title, description, original_name, stored_name, stored_path, size, folder_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO files (title, description, original_name, stored_name, stored_path, size, mime_type, folder_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         finalTitle,
         description || null,
@@ -101,6 +140,7 @@ async function uploadFile(req, res) {
         file.filename,
         file.path,
         file.size,
+        file.mimetype,
         finalFolder,
       ]
     );
@@ -110,6 +150,8 @@ async function uploadFile(req, res) {
       title: finalTitle,
       original_name: file.originalname,
       size: file.size,
+      mime_type: file.mimetype,
+      detected_type: MAGIC_BYTES[detected].label,
       folder_name: finalFolder,
     });
   } catch (err) {

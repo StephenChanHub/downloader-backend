@@ -13,7 +13,7 @@ async function listFiles(req, res) {
 
     // 核心：按 folder_name 过滤，只返回该用户专属文件夹内的文件
     const [rows] = await pool.query(
-      `SELECT id, title, description, size, created_at, folder_name
+      `SELECT id, title, description, size, mime_type, created_at, folder_name
        FROM files
        WHERE status = 'active' AND folder_name = ?
        ORDER BY created_at DESC`,
@@ -132,7 +132,17 @@ async function downloadFile(req, res) {
     }
 
     // 流式输出文件内容（支持 Range 分段读取）
-    const readStream = fs.createReadStream(resolvedPath, { start, end });
+    // highWaterMark: 1MB 缓冲区，大幅减少大文件 I/O 操作次数
+    const readStream = fs.createReadStream(resolvedPath, {
+      start,
+      end,
+      highWaterMark: 1024 * 1024, // 1MB 块大小
+    });
+
+    // 监听下载完成/中断，清理资源
+    res.on('close', () => {
+      if (!readStream.destroyed) readStream.destroy();
+    });
 
     readStream.on('error', (err) => {
       console.error(`[Files] 文件流读取失败: ${err.message}`);

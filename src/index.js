@@ -122,9 +122,9 @@ app.use('/api/files', filesRoutes);
 // Multer 文件类型/大小校验错误
 app.use((err, req, res, next) => {
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: '文件大小超出限制（最大 100MB）' });
+    return res.status(413).json({ error: '文件大小超出限制（最大 500MB）' });
   }
-  if (err.message === '仅允许上传 PDF 文件') {
+  if (err.message && err.message.startsWith('仅允许上传')) {
     return res.status(400).json({ error: err.message });
   }
   next(err);

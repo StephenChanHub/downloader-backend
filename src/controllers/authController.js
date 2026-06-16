@@ -26,7 +26,7 @@ async function verifyKey(req, res) {
     const inputHash = crypto.createHash('sha256').update(key).digest('hex');
 
     const [keys] = await pool.query(
-      `SELECT id, folder_name, duration_minutes, status, used_at
+      `SELECT id, key_hash, folder_name, duration_minutes, status, used_at
        FROM access_keys
        WHERE key_hash = ?
          AND (expires_at IS NULL OR expires_at > NOW())
@@ -38,8 +38,12 @@ async function verifyKey(req, res) {
       [inputHash]
     );
 
+    // 诊断日志：打印哈希前8位，方便对比数据库中的值
+    console.log(`[Auth] 输入密钥 SHA-256: ${inputHash.substring(0, 16)}...`);
+    console.log(`[Auth] 数据库匹配结果: ${keys.length} 条`);
+
     if (keys.length === 0) {
-      console.log('[Auth] 密钥无效、已过期或不存在');
+      console.log('[Auth] ❌ 密钥无效 — 可能是数据库中的 key_hash 仍为旧 bcrypt 格式，请 TRUNCATE 后重新发卡');
       return res.status(401).json({ error: '密钥无效、已过期或不存在' });
     }
 
@@ -59,8 +63,14 @@ async function verifyKey(req, res) {
       // 场景 B：老用户重返，计算还剩多少时间（防止无限重置！）
       const usedAt = new Date(matchedKey.used_at).getTime();
       const absoluteExpireTime = usedAt + durationMs;
-      remainingDurationMs = Math.max(0, absoluteExpireTime - Date.now());
+      remainingDurationMs = absoluteExpireTime - Date.now();
       finalExpiresAt = new Date(absoluteExpireTime);
+    }
+
+    // 额外防御：如果剩余时间 ≤ 0，说明刚刚过期
+    if (remainingDurationMs <= 0) {
+      console.log('[Auth] ❌ 密钥寿命已耗尽');
+      return res.status(401).json({ error: '密钥已过期' });
     }
 
     const rawToken = generateToken();

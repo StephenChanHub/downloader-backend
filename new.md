@@ -1,56 +1,196 @@
-> **【V2.0 升级目标】**
-> 当前基础功能已通过 30 人并发测试，非常稳定。现在我需要你配合我进行 **V2.0 版本的进阶升级**。升级分为三个维度，请你仔细阅读以下工作流，**但我要求你先不要一次性把所有代码全写出来，而是等我下达“开始 Phase X”的指令后，再逐一输出。**
->
-> ---
->
-> ### 🚀 工作流与任务拆解 (V2.0)
->
-> #### Phase 1: 用户体验升级 (UX Enhancement)
->
-> **任务 1.1：文件列表的分页与搜索**
->
-> - **后端侧 (`filesController.js`)**：改造 `GET /api/files` 接口，支持接收 `?page=1&limit=20&search=xxx` 参数。使用 SQL 的 `LIMIT` 和 `OFFSET` 实现分页，使用 `LIKE '%xxx%'` 对 `title` 进行模糊搜索。返回格式需包含 `total`（总条数）和 `files`（当前页数据）。
-> - **前端侧**：在列表页顶部增加搜索框；底部增加分页器组件 (Pagination)。
->
-> **任务 1.2：PDF 在线预览功能**
->
-> - **前端侧**：在文件列表中增加一个“预览”按钮。点击后，弹出一个 Modal（模态框）或打开新路由，使用 `<iframe src="/api/files/:id/download">` 配合浏览器原生 PDF 解析器，或者集成轻量级的 `pdfjs-dist` / `react-pdf` 实现网页端直接阅读。
->
-> #### Phase 2: 安全与防御强化 (Stability & Security)
->
-> **任务 2.1：高频防爆破限流 (Rate Limiting)**
->
-> - **后端侧 (`index.js` & `auth.js`)**：引入 `express-rate-limit`。
-> - 针对全局 API：限制每个 IP 15 分钟内最多 500 次请求。
-> - 针对 `/api/auth/verify-key`（门票验证接口）：严格限制每个 IP 1 分钟内最多试错 5 次，超出则封禁 15 分钟。提示信息：“请求过于频繁，请稍后再试”。
->
-> **任务 2.2：断点续传与大文件并发支持**
->
-> - **后端侧 (`filesController.js`)**：优化 `downloadFile` 控制器。解析客户端发来的 `Range` 请求头。如果包含 `Range`，则使用 `fs.createReadStream(path, { start, end })` 返回 `206 Partial Content`。这能极大降低服务器瞬时内存压力，支持下载工具多线程下载和暂停/恢复。
->
-> #### Phase 3: 监控与可视化看板 (Observability & Admin)
->
-> **任务 3.1：专业化日志系统**
->
-> - **后端侧**：移除控制台杂乱的 `console.log`。引入 `winston` 和 `winston-daily-rotate-file`。
-> - 配置策略：控制台输出带颜色的精简日志；将详细报错日志写入 `logs/error-%DATE%.log`，日常访问/审计日志写入 `logs/combined-%DATE%.log`（最多保留 14 天）。结合 `morgan` 记录所有 HTTP 请求。
->
-> **任务 3.2：管理员统计仪表盘 (Dashboard)**
->
-> - **后端侧 (`adminController.js`)**：新增 `GET /api/admin/stats` 接口。
-> - 统计指标 1：总存储空间占用（利用 Node.js `fs.stat` 遍历或直接 `SUM(size)` 数据库聚合）。
-> - 统计指标 2：今日活跃访客数（统计 `download_logs` 或 `sessions` 表今日的 unique IP/Session）。
-> - 统计指标 3：历史下载量 Top 10 的文件。
-> - **前端侧**：在管理员后台首页绘制 Dashboard 面板，以卡片形式展示数据（如有需要可引入 `recharts` 等轻量图表库）。
->
-> ---
->
-> **【代码生成规则】**
->
-> 1. **增量修改**：在输出代码时，请明确指出“在哪个文件的哪一行”进行添加或替换，不要每次都输出整个几百行的文件。
-> 2. **保持原逻辑不变**：绝对不能破坏现有的 `category` 分类逻辑、Cookie Session 逻辑和 CORS 配置。
-> 3. **环境兼容**：所有新功能必须兼容现有的 Sealos Kubernetes 部署环境及代理模式。
->
-> **如果你已经理解了当前架构、升级目标和规则，请回复：“我已完全理解 V2.0 升级计划，架构上下文已加载。请下达指令开始执行某个具体的 Phase 或任务。”**
+# V2.1 更新日志 — 压缩包支持 + 大文件优化
+
+> **发布日期**: 2026-06-11
 
 ---
+
+## 一、后端变更
+
+### 1. 上传能力升级
+
+| 项目 | 旧值 | 新值 |
+|---|---|---|
+| 最大文件体积 | 100MB | **500MB** |
+| 支持格式 | 仅 PDF | **PDF + zip / rar / 7z / gz / tar / bz2 / xz / tgz** |
+| 文件类型校验 | 仅 MIME | **MIME + 扩展名 + 幻数（Magic Bytes）三重校验** |
+| 标题自动生成 | 仅去 `.pdf` | **通用去扩展名（支持复合扩展名 `.tar.gz`）** |
+
+**涉及文件**：
+
+- [`src/middleware/upload.js`](src/middleware/upload.js) — Multer 配置：500MB 上限、14 种 MIME 类型白名单、扩展名二次校验
+- [`src/controllers/adminController.js`](src/controllers/adminController.js) — 新增 `detectFileType()` 幻数检测函数，支持 PDF/ZIP/RAR/7z/GZ/BZ2/XZ 7 种格式的二进制头部校验；新增 `extractTitle()` 通用标题提取
+- [`src/index.js`](src/index.js) — Multer 错误处理消息更新
+
+### 2. 下载性能优化
+
+| 优化项 | 旧值 | 新值 | 效果 |
+|---|---|---|---|
+| 流式读取缓冲区 | 64KB（Node 默认） | **1MB** | 大文件 I/O 操作减少 16 倍 |
+| 连接断开清理 | 无 | `res.on('close')` 销毁流 | 防止用户取消下载后资源泄漏 |
+| 用户文件列表 | 无 `mime_type` | 新增 `mime_type` 字段 | 前端可根据类型显示不同图标 |
+
+**涉及文件**：
+
+- [`src/controllers/filesController.js`](src/controllers/filesController.js) — `highWaterMark: 1024 * 1024`、`res.on('close')` 资源清理、`listFiles` 增加 `mime_type` 返回
+
+### 3. 上传接口返回值新增字段
+
+`POST /api/admin/files/upload` 成功响应新增：
+
+```json
+{
+  "id": 1,
+  "title": "课件资料",
+  "original_name": "课件资料.zip",
+  "size": 52428800,
+  "mime_type": "application/zip",
+  "detected_type": "ZIP",
+  "folder_name": "public"
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `mime_type` | 浏览器上报的 MIME 类型 |
+| `detected_type` | 服务端幻数检测的实际类型（`PDF`/`ZIP`/`RAR`/`7z`/`GZIP`/`BZ2`/`XZ`） |
+
+---
+
+## 二、前端对接工作
+
+### 2.1 上传表单改造
+
+**文件**：`AdminPage` 上传区域
+
+需要修改的点：
+
+1. **文件选择器** — `accept` 属性扩展：
+   ```jsx
+   <input
+     type="file"
+     accept=".pdf,.zip,.rar,.7z,.gz,.tar,.bz2,.xz,.tgz"
+     onChange={handleFileChange}
+   />
+   ```
+
+2. **上传大小限制提示** — 更新为 500MB：
+   ```jsx
+   <p className="form-hint">支持 PDF、ZIP、RAR、7z、GZ、TAR、BZ2、XZ，最大 500MB</p>
+   ```
+
+3. **上传进度优化**（大文件推荐）：
+   ```jsx
+   // 使用 XMLHttpRequest 或 axios onUploadProgress 显示进度条
+   const formData = new FormData();
+   formData.append('file', file);
+   formData.append('title', title);
+   formData.append('description', description);
+   formData.append('folder_name', folderName);
+
+   const response = await axios.post('/api/admin/files/upload', formData, {
+     headers: { 'Content-Type': 'multipart/form-data' },
+     onUploadProgress: (e) => {
+       const pct = Math.round((e.loaded / e.total) * 100);
+       setUploadProgress(pct);
+     },
+     timeout: 600000, // 10 分钟超时（500MB 在慢网络上需要较长时间）
+   });
+   ```
+
+4. **上传响应处理** — 适配新增字段：
+   ```jsx
+   // 旧代码只需 res.data.title，新字段可选使用
+   const { id, title, size, mime_type, detected_type, folder_name } = response.data;
+   // detected_type 可用于显示文件类型标签
+   // mime_type 可用于前端渲染对应的文件图标
+   ```
+
+### 2.2 文件列表展示改造
+
+**文件**：`ResourcesPage` / `AdminPage` 文件列表
+
+`GET /api/files` 和 `GET /api/admin/files` 现在返回 `mime_type` 字段，前端可据此渲染文件类型图标：
+
+```jsx
+function getFileIcon(mimeType) {
+  if (!mimeType) return <FileIcon />;
+  if (mimeType === 'application/pdf') return <PdfIcon />;
+  if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('7z'))
+    return <ArchiveIcon />;
+  if (mimeType.includes('gzip') || mimeType.includes('tar') || mimeType.includes('bz2'))
+    return <ArchiveIcon />;
+  return <FileIcon />;
+}
+
+// 在列表渲染中使用
+{files.map(f => (
+  <div key={f.id} className="file-item">
+    {getFileIcon(f.mime_type)}
+    <span>{f.title}</span>
+    <span>{formatFileSize(f.size)}</span>
+  </div>
+))}
+```
+
+### 2.3 下载体验优化
+
+**文件**：`ResourceCard` 或下载按钮组件
+
+大文件下载建议：
+
+1. **下载状态提示**：
+   ```jsx
+   const [downloading, setDownloading] = useState(null); // file id
+
+   async function handleDownload(file) {
+     setDownloading(file.id);
+     try {
+       // 大于 100MB 的文件，提示用户耐心等待
+       if (file.size > 100 * 1024 * 1024) {
+         showToast(`正在准备下载 ${file.title}，文件较大请耐心等待...`);
+       }
+       await downloadFile(file.id);
+     } finally {
+       setDownloading(null);
+     }
+   }
+   ```
+
+2. **文件大小友好显示**（500MB 级别需要）：
+   ```jsx
+   function formatFileSize(bytes) {
+     if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024*1024*1024)).toFixed(2) + ' GB';
+     if (bytes >= 1024 * 1024) return (bytes / (1024*1024)).toFixed(1) + ' MB';
+     if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+     return bytes + ' B';
+   }
+   ```
+
+### 2.4 数据库（如前端直连）
+
+无需变更。`files` 表新增字段已通过 ALTER TABLE 添加（`mime_type` 字段原本已存在）。
+
+---
+
+## 三、兼容性说明
+
+| 项目 | 兼容情况 |
+|---|---|
+| 旧 PDF 文件 | ✅ 完全兼容，上传/下载/列表均正常 |
+| 旧前端（未更新 accept） | ⚠️ 文件选择器不会显示压缩包，需手动选择"所有文件" |
+| API 返回格式 | ✅ 向后兼容，新增字段为增量，旧字段不变 |
+| Cookie Session 逻辑 | ✅ 无变更 |
+| 文件夹隔离 | ✅ 无变更 |
+| Range 断点续传 | ✅ 已支持，500MB 文件下载可暂停/恢复 |
+
+---
+
+## 四、部署检查清单
+
+- [ ] `npm install` 确认依赖无缺失（本次无新增依赖）
+- [ ] 重启后端服务
+- [ ] 测试上传 < 5MB 的小 PDF（验证向后兼容）
+- [ ] 测试上传 200MB zip 包（验证大文件 + 新格式）
+- [ ] 测试下载 200MB 文件（验证吞吐量 + Range 支持）
+- [ ] 测试上传不支持的文件格式（验证拒绝逻辑）
+- [ ] 前端更新 `accept` 属性、上传提示文案、文件图标逻辑
