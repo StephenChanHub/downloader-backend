@@ -19,6 +19,9 @@ router.post(
 // GET /api/admin/files — 获取所有文件列表
 router.get('/files', adminAuth, adminController.listFiles);
 
+// PATCH /api/admin/files/:id — 更新文件元数据（标题/描述/文件夹）
+router.patch('/files/:id', adminAuth, adminController.updateFile);
+
 // DELETE /api/admin/files/:id — 删除文件
 router.delete('/files/:id', adminAuth, adminController.deleteFile);
 

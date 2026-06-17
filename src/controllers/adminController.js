@@ -230,6 +230,79 @@ async function deleteFile(req, res) {
 }
 
 /**
+ * 更新文件元数据（标题、描述、文件夹）
+ * PATCH /api/admin/files/:id
+ */
+async function updateFile(req, res) {
+  const { id } = req.params;
+  const { title, description, folder_name } = req.body;
+
+  try {
+    // 校验至少提供一个字段
+    if (title === undefined && description === undefined && folder_name === undefined) {
+      return res.status(400).json({ error: '请至少提供 title、description 或 folder_name 之一' });
+    }
+
+    // 输入长度校验
+    if (title !== undefined && (typeof title !== 'string' || title.length > 200)) {
+      return res.status(400).json({ error: '标题不能超过 200 个字符' });
+    }
+    if (description !== undefined && (typeof description !== 'string' || description.length > 2000)) {
+      return res.status(400).json({ error: '描述不能超过 2000 个字符' });
+    }
+    if (folder_name !== undefined && (typeof folder_name !== 'string' || folder_name.length > 50)) {
+      return res.status(400).json({ error: '文件夹名不能超过 50 个字符' });
+    }
+
+    // 构建动态 UPDATE
+    const setClauses = [];
+    const params = [];
+
+    if (title !== undefined) {
+      setClauses.push('title = ?');
+      params.push(title.trim() || null);
+    }
+    if (description !== undefined) {
+      setClauses.push('description = ?');
+      params.push(description.trim() || null);
+    }
+    if (folder_name !== undefined) {
+      setClauses.push('folder_name = ?');
+      params.push(folder_name.trim() || 'public');
+    }
+
+    if (setClauses.length === 0) {
+      return res.status(400).json({ error: '没有可更新的字段' });
+    }
+
+    params.push(id);
+
+    const [result] = await pool.query(
+      `UPDATE files SET ${setClauses.join(', ')} WHERE id = ?`,
+      params
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: '文件不存在' });
+    }
+
+    // 返回更新后的完整记录
+    const [rows] = await pool.query(
+      `SELECT id, title, description, original_name, stored_name,
+              size, mime_type, status, folder_name, download_count, created_at, updated_at
+       FROM files WHERE id = ?`,
+      [id]
+    );
+
+    console.log(`[Admin] ✅ 文件 ID=${id} 已更新`);
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error('[Admin] 文件更新失败:', err.message);
+    return res.status(500).json({ error: '文件更新失败' });
+  }
+}
+
+/**
  * 管理员统计仪表盘
  * GET /api/admin/stats
  */
@@ -290,4 +363,4 @@ async function getStats(req, res) {
   }
 }
 
-module.exports = { login, uploadFile, listFiles, deleteFile, getStats };
+module.exports = { login, uploadFile, listFiles, updateFile, deleteFile, getStats };
