@@ -167,9 +167,14 @@ async function start() {
     console.error('[数据库] 服务将继续运行，但 API 调用将返回 500');
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Server] PDF 分发系统已启动: http://0.0.0.0:${PORT}`);
   });
+
+  // 大文件上传超时配置（默认 2 分钟 → 10 分钟，支持 500MB 上传）
+  server.timeout = 10 * 60 * 1000;       // 请求空闲超时 10 分钟
+  server.headersTimeout = 10 * 60 * 1000; // 请求头解析超时（需 ≥ timeout）
+  server.keepAliveTimeout = 65 * 1000;    // Keep-Alive 65 秒（略高于常见代理超时）
 }
 
 start().catch((err) => {
